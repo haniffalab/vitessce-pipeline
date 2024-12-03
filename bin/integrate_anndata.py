@@ -3,6 +3,7 @@
 from typing import Union
 import typing as T
 import os
+import gc
 import fire
 import zarr
 import h5py
@@ -43,7 +44,7 @@ def reindex_anndata(
         adata = data
     else:
         adata = read_anndata(data)
-        out_filename = out_filename or "concat-{}".format(
+        out_filename = out_filename or "reindexed-{}".format(
             os.path.splitext(os.path.basename(data))[0]
         )
 
@@ -99,6 +100,9 @@ def intersect_features(*paths, **kwargs):
 
         write_anndata(adata, out_filename, **kwargs)
 
+        del adata
+        gc.collect()
+
     return
 
 
@@ -106,7 +110,7 @@ def concat_matrix_from_obs(
     data: Union[ad.AnnData, str],
     obs: str = "celltype",
     feature_name: str = "gene",
-    obs_feature_name: str = None,
+    concat_feature_name: str = None,
 ):
     if isinstance(data, ad.AnnData):
         adata = data
@@ -115,14 +119,14 @@ def concat_matrix_from_obs(
 
     ext_matrix = pd.get_dummies(adata.obs[obs], dtype="float32")
 
-    return concat_matrices(adata, ext_matrix, obs, feature_name, obs_feature_name)
+    return concat_matrices(adata, ext_matrix, feature_name, concat_feature_name or obs)
 
 
 def concat_matrix_from_obsm(
     data: Union[ad.AnnData, str],
     obsm: str = "celltype",
     feature_name: str = "gene",
-    obsm_feature_name: str = None,
+    concat_feature_name: str = None,
 ):
     if isinstance(data, ad.AnnData):
         adata = data
@@ -130,7 +134,7 @@ def concat_matrix_from_obsm(
         adata = read_anndata(data)
 
     return concat_matrices(
-        adata, adata.obsm[obsm], "celltype", feature_name, obsm_feature_name
+        adata, adata.obsm[obsm], feature_name, concat_feature_name or obsm
     )
 
 
@@ -140,9 +144,10 @@ def concat_matrix_from_cell2location(
     q: str = "q05_cell_abundance_w_sf",
     sample: tuple[str, str] = None,
     feature_name: str = "gene",
-    obs_feature_name: str = None,
+    concat_feature_name: str = "celltype",
     sort: bool = True,
     sort_index: str = None,
+    fill_missing: bool = False,
     **kwargs,
 ):
     sort = sort or sort_index is not None
@@ -185,7 +190,15 @@ def concat_matrix_from_cell2location(
                     )
                 idx = c2l_adata.obs.index.get_indexer(data_idx.tolist())
                 if -1 in idx:
-                    raise Exception("Non-matching indices present.")
+                    if not fill_missing:
+                        raise Exception("Non-matching indices present.")
+                    else:
+                        logging.info(
+                            "Filling missing indices in cell2location output with NaN values."
+                        )
+                        c2l_adata, idx = fill_missing_indices(
+                            idx, data_idx, adata, c2l_adata, sort_index
+                        )
             except Exception:
                 raise SystemError(
                     "Failed to find a match between indices as substrings."
@@ -202,39 +215,37 @@ def concat_matrix_from_cell2location(
         dtype="float32",
     )
 
-    return concat_matrices(
-        adata, c2l_df, "celltype", feature_name, obs_feature_name, **kwargs
-    )
+    return concat_matrices(adata, c2l_df, feature_name, concat_feature_name, **kwargs)
 
 
 def concat_matrices(
     adata: ad.AnnData,
     ext_df: pd.DataFrame,
-    obs: str = "celltype",
     feature_name: str = "gene",
-    obs_feature_name: str = None,
+    concat_feature_name: str = "celltype",
 ):
     assert adata.shape[0] == ext_df.shape[0]
 
-    obs_feature_name = obs_feature_name or obs
     prev_features_bool = "is_{}".format(feature_name)
-    new_features_bool = "is_{}".format(obs_feature_name)
+    new_features_bool = "is_{}".format(concat_feature_name)
 
     if isinstance(adata.X, spmatrix):
         adata_concat = ad.AnnData(
             hstack(
                 (
                     adata.X,
-                    csr_matrix(ext_df.values)
-                    if isinstance(adata.X, csr_matrix)
-                    else csc_matrix(ext_df.values),
+                    (
+                        csr_matrix(ext_df.values)
+                        if isinstance(adata.X, csr_matrix)
+                        else csc_matrix(ext_df.values)
+                    ),
                 )
             ),
             obs=adata.obs,
             var=pd.concat(
                 [
                     adata.var.assign(**{prev_features_bool: True}),
-                    ext_df.columns.to_frame(obs_feature_name)
+                    ext_df.columns.to_frame(concat_feature_name)
                     .drop(columns=0)
                     .assign(**{new_features_bool: True}),
                 ]
@@ -249,7 +260,7 @@ def concat_matrices(
             var=pd.concat(
                 [
                     adata.var.assign(**{prev_features_bool: True}),
-                    ext_df.columns.to_frame(obs_feature_name)
+                    ext_df.columns.to_frame(concat_feature_name)
                     .drop(columns=0)
                     .assign(**{new_features_bool: True}),
                 ]
@@ -284,6 +295,7 @@ def get_feature_intersection(*paths):
                 var_indices.append(ad._io.h5ad.read_elem(f["var"]).index.to_series())
 
     var_intersect = pd.concat(var_indices, axis=1, join="inner").index
+    logging.info(f"Got intersection of {len(var_intersect)} features")
 
     return var_intersect
 
@@ -313,8 +325,20 @@ def write_anndata(
 
 def match_substring_indices(fullstring_idx, substring_idx):
     return pd.Series(substring_idx).apply(
-        lambda x: fullstring_idx[fullstring_idx.str.contains(x)].values[0]
+        lambda x: (
+            lambda y=fullstring_idx[fullstring_idx.str.contains(x)]: (
+                y.values[0] if len(y.values) else x
+            )
+        )()
     )
+
+
+def fill_missing_indices(idx, data_idx, adata, c2l_adata, sort_index):
+    adata_missing = ad.AnnData(obs=pd.DataFrame(adata.obs.iloc[idx == -1][sort_index]))
+    adata_missing.obs.set_index(sort_index, inplace=True)
+    c2l_adata_w_missing = ad.concat([c2l_adata, adata_missing], join="outer")
+    idx = c2l_adata_w_missing.obs.index.get_indexer(data_idx.tolist())
+    return c2l_adata_w_missing, idx
 
 
 if __name__ == "__main__":

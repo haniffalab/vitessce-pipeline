@@ -97,6 +97,9 @@ process process_anndata {
     features_str = features
         ? "--features ${features_file.name != 'NO_FT' ? features_file : features}"
         : ""
+    feature_name_str = config_map.extend_feature_name
+        ? "--concat_feature_name ${config_map.extend_feature_name}"
+        : ""
     args_str = features_file.name != 'NO_FT' && features_args
         ? "--args '" + new JsonBuilder(features_args).toString() + "'" : ""
     """
@@ -141,12 +144,15 @@ process Build_multimodal_config {
 
     script:
     url_str = config_map.url?.trim() ? "--url \"${config_map.url.trim()}\"" : ""
+    extended_features_str = config_map.extend_feature_name
+        ? "--extended_features ${config_map.extend_feature_name}"
+        : ""
     datasets_str = new JsonBuilder(datasets).toString()
     """
     build_config_multimodal.py \
         --project "${project}" \
         --datasets '${datasets_str}' \
-        --extended_features "${config_map.extend_feature_name}" \
+        ${extended_features_str} \
         ${url_str} \
         --title "${config_map.title}" \
         --description "${config_map.description}"

@@ -1,23 +1,22 @@
-import pytest
-
-import os
 import csv
 import json
+import os
 from xml.etree.ElementTree import ElementTree
 
-import xmlschema
-import zarr
+import anndata as ad
 import numpy as np
 import pandas as pd
-import anndata as ad
+import pytest
+import xmlschema
+import zarr
 from scipy.sparse import csc_matrix, csr_matrix
 
+from bin.consolidate_md import consolidate
+from bin.generate_image import create_img
+from bin.ome_zarr_metadata import get_metadata
 from bin.process_h5ad import h5ad_to_zarr
 from bin.process_molecules import tsv_to_json
-from bin.consolidate_md import consolidate
 from bin.router import process
-from bin.ome_zarr_metadata import get_metadata
-from bin.generate_image import create_img
 
 # from bin.build_config_multimodal import write_json as write_json_multimodal
 # from bin.build_config import write_json

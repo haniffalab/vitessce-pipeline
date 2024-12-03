@@ -189,7 +189,13 @@ def preprocess_anndata(
 
     # reindex var with a specified column
     if var_index and var_index in adata.var:
-        adata.var.reset_index(inplace=True)
+        try:
+            adata.var.reset_index(inplace=True)
+        except ValueError:
+            logging.warning(
+                "Column already exists when trying to reset var index. Dropping index."
+            )
+            adata.var.reset_index(inplace=True, drop=True)
         adata.var.set_index(var_index, inplace=True)
         adata.var.index = adata.var.index.astype(str)
     adata.var_names_make_unique()

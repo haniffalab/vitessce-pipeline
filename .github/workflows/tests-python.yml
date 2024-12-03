@@ -34,7 +34,7 @@ jobs:
           pip install -r ./envs/dev/requirements.txt
           cd ./ome-zarr-metadata && pre-commit install && pip install -e . && cd ../
       - name: Run tests
-        run: python -m pytest --cov=bin tests/test_class.py
+        run: python -m pytest --cov=bin tests/
         env:
           PYTHONPATH: ./bin
       - name: Upload coverage to Codecov

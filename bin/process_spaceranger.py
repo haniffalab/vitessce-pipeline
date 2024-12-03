@@ -52,9 +52,9 @@ def spaceranger_to_anndata(
 
     adata = sc.read_visium(
         p,
-        count_file="raw_feature_bc_matrix.h5"
-        if load_raw
-        else "filtered_feature_bc_matrix.h5",
+        count_file=(
+            "raw_feature_bc_matrix.h5" if load_raw else "filtered_feature_bc_matrix.h5"
+        ),
     )
 
     if load_clusters:
@@ -132,7 +132,7 @@ def visium_label(
     stem: str,
     file_path: str,
     shape: tuple[int, int] = None,
-    obs_subset: tuple[int, T.Any] = None,
+    obs_subset: tuple[str, T.Any] = None,
     sample_id: str = None,
     relative_size: str = None,
 ) -> None:
